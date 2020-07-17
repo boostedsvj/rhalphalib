@@ -138,13 +138,14 @@ def install_roofit_helpers():
 
     _ROOT.RooAbsCollection.assign = _RooAbsCollection_assign
 
-    def _RooArgList_fromiter(cls, iterable, silent=False):
+    def _cls_fromiter(cls, iterable, silent=False):
         items = cls()
         for item in iterable:
             items.add(item, silent)
         return items
 
-    _ROOT.RooArgList.fromiter = classmethod(_RooArgList_fromiter)
+    _ROOT.RooArgList.fromiter = classmethod(_cls_fromiter)
+    _ROOT.RooArgSet.fromiter = classmethod(_cls_fromiter)
 
     def _RooAbsReal__add__(self, other):
         '''
