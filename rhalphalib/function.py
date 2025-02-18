@@ -206,12 +206,14 @@ class DecorrelatedNuisanceVector(object):
 
         _, s, v = np.linalg.svd(param_cov)
         self._transform = np.sqrt(s)[:, None] * v
-        self._parameters = np.array([NuisanceParameter(prefix + str(i), "param") for i in range(param_in.size)])
+        self._parameters = np.array([NuisanceParameter(prefix + str(i+1), "param") for i in range(param_in.size)])
         self._correlated = np.full(self._parameters.shape, None)
+        self._correlated_str = []
         for i in range(self._parameters.size):
             coef = self._transform[:, i]
             order = np.argsort(np.abs(coef))
             self._correlated[i] = np.sum(self._parameters[order] * coef[order]) + param_in[i]
+            self._correlated_str.append('('+' + '.join([f"{coef[o]:.3g}*{self._parameters[o].name}" for o in order])+f' + {param_in[i]:.3g})')
 
     @classmethod
     def fromRooFitResult(cls, prefix, fitresult, param_names=None):
@@ -236,3 +238,7 @@ class DecorrelatedNuisanceVector(object):
     @property
     def correlated_params(self):
         return self._correlated
+
+    @property
+    def correlated_str(self):
+        return '\n'.join(self._correlated_str)
