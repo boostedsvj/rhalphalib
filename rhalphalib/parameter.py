@@ -12,9 +12,10 @@ class Parameter(object):
         self._intermediate = False
 
     def __repr__(self):
-        return "<%s (%s) instance at 0x%x>" % (
+        return "<%s (%s, %s) instance at 0x%x>" % (
             self.__class__.__name__,
             self._name,
+            self._value,
             id(self),
         )
 
@@ -304,6 +305,14 @@ class Observable(Parameter):
     def __init__(self, name, binning):
         super(Observable, self).__init__(name, np.nan)
         self._binning = np.array(binning)
+
+    def __repr__(self):
+        return "<%s (%s, %s) instance at 0x%x>" % (
+            self.__class__.__name__,
+            self._name,
+            self._binning,
+            id(self),
+        )
 
     def __eq__(self, other):
         if isinstance(other, Observable) and self._name == other._name and np.allclose(self._binning, other._binning):
