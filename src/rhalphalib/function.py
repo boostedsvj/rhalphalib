@@ -204,7 +204,7 @@ class BasisPoly:
         # covariance is invalidated whenever parameters are changed
         self._cov = None
 
-    def update_from_roofit(self, fit_result, from_deco=False):
+    def update_from_roofit(self, fit_result):
         par_names = sorted([p for p in fit_result.floatParsFinal().contentsString().split(",") if self.name in p])
         means, cov = params_from_roofit(fit_result, par_names)
         par_results = {p: round(means[i], 3) for i, p in enumerate(par_names)}
