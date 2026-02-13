@@ -243,11 +243,11 @@ class BasisPoly:
             if isinstance(x, numbers.Number):
                 x = np.array(x)
             if not np.all((x >= 0) & (x <= 1)):
-                raise ValueError("Bernstein polynomials are only defined on the interval [0, 1]")
+                raise ValueError("Basis polynomials are only defined on the interval [0, 1]")
             if shape is None:
                 shape = x.shape
             elif shape != x.shape:
-                raise ValueError("BernsteinPoly: all variables must have same shape")
+                raise ValueError("BasisPoly: all variables must have same shape")
             xvals.append(x.flatten())
 
         parameters = self._params.reshape(-1)
