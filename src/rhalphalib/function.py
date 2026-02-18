@@ -39,6 +39,12 @@ def matrix_poly(n: int):
     return np.identity(n + 1)
 
 
+def svd_transform(cov):
+    _, s, v = np.linalg.svd(cov)
+    _transform = np.sqrt(s)[:, None] * v
+    return transform
+
+
 def params_from_roofit(fitresult, param_names=None):
     install_roofit_helpers()
     names = [p.GetName() for p in fitresult.floatParsFinal()]
@@ -400,19 +406,18 @@ class DecorrelatedNuisanceVector:
     Parameters:
         prefix: a prefix for the names of the parameters
         param_in: a numpy array of means for the nuisance parameters
-        param_cov: a numpy array of covariance matrix for the nuisance parameters
+        transform: a numpy array of coefficients, derived from the singular value decomposition of the covariance matrix of the nuisance parameters
     """
 
-    def __init__(self, prefix: str, param_in: np.ndarray, param_cov: np.ndarray):
+    def __init__(self, prefix: str, param_in: np.ndarray, transform: np.ndarray):
         if not isinstance(param_in, np.ndarray):
             raise ValueError("Expecting param_in to be numpy array")
-        if not isinstance(param_cov, np.ndarray):
-            raise ValueError("Expecting param_cov to be numpy array")
-        if not (len(param_in.shape) == 1 and len(param_cov.shape) == 2 and param_cov.shape[0] == param_in.shape[0] and param_cov.shape[1] == param_in.shape[0]):
-            raise ValueError("param_in and param_cov have mismatched shapes")
+        if not isinstance(transform, np.ndarray):
+            raise ValueError("Expecting transform to be numpy array")
+        if not (len(param_in.shape) == 1 and len(transform.shape) == 2 and transform.shape[0] == param_in.shape[0] and transform.shape[1] == param_in.shape[0]):
+            raise ValueError("param_in and transform have mismatched shapes")
 
-        _, s, v = np.linalg.svd(param_cov)
-        self._transform = np.sqrt(s)[:, None] * v
+        self._transform = transform
         self._parameters = np.array([NuisanceParameter(prefix + str(i + 1), "param") for i in range(param_in.size)])
         self._correlated = np.full(self._parameters.shape, None)
         for i in range(self._parameters.size):
@@ -431,7 +436,8 @@ class DecorrelatedNuisanceVector:
                 all parameters in the fit result will be included.
         """
         means, cov = params_from_roofit(fitresult, param_names)
-        out = cls(prefix, means, cov)
+        transform = svd_transform(cov)
+        out = cls(prefix, means, transform)
         if param_names is not None:
             for p, name in zip(out.correlated_params, param_names):
                 p.name = name
