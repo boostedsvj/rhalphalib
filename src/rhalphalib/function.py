@@ -371,7 +371,7 @@ class ProductBasisPoly:
             if ifn==0:
                 results = tmp
             else:
-                results = np.dot(results, tmp)
+                results *= tmp
         return results
 
     def __call__(self, *vals, nominal: bool = True, errorband: bool = False):
