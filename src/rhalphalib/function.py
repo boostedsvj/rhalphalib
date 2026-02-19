@@ -61,7 +61,16 @@ def get_parvalues(params):
     return np.vectorize(lambda p: p.value)(params)
 
 
-def compute_band(obj, shape, coefficients, central):
+def update_par(par, value):
+    if par.__class__.value.fset is not None:
+        par.value = value
+        return par
+    else:
+        par_fake = IndependentParameter(par.name, value)
+        return par_fake
+
+
+def compute_band(obj, shape, coefficients, central, independent: bool = False):
     """
     This computation follows the linearized error propagation method used in RooAbsReal::plotOnWithErrorBand() and RooCurve::calcBandInterval()
     err(x) = F(x,a) C_ab F(x,b)
@@ -73,17 +82,17 @@ def compute_band(obj, shape, coefficients, central):
     # compute gradients
     plus_vars = []
     minus_vars = []
-    params = obj.parameters.reshape(-1)
+    params = obj.flat_parameters(independent)
     for i, par in enumerate(params):
         val = par.value
         err = np.sqrt(obj._cov[i, i])
         # temporarily vary param
-        obj.set_par_by_name(par.name, val + err)
+        obj.set_par_by_name(par.name, val + err, independent)
         plus_vars.append(obj._eval(shape, coefficients))
-        obj.set_par_by_name(par.name, val - err)
+        obj.set_par_by_name(par.name, val - err, independent)
         minus_vars.append(obj._eval(shape, coefficients))
         # reset to central value
-        obj.set_par_by_name(par.name, val)
+        obj.set_par_by_name(par.name, val, independent)
     # flatten
     plus_vars = np.stack(plus_vars).reshape(len(params), -1)
     minus_vars = np.stack(minus_vars).reshape(len(params), -1)
@@ -196,13 +205,26 @@ class BasisPoly:
     def parameters(self):
         return self._params
 
+    @property
+    def independent_parameters(self):
+        ind_params = set()
+        for param in self._params:
+            ind_params.update(param.getDependents(deep=True))
+        return ind_params
+
+    def flat_parameters(self, independent: bool = False):
+        if independent:
+            return self.independent_parameters
+        else:
+            return self._params.reshape(-1)
+
     @parameters.setter
     def parameters(self, newparams):
         if not isinstance(newparams, np.ndarray):
             raise ValueError("newparams should be numpy array")
         elif newparams.shape != self._params.shape:
             raise ValueError("newparams shape does not match")
-        for pnew, pold in zip(newparams.reshape(-1), self._params.reshape(-1)):
+        for pnew, pold in zip(newparams.reshape(-1), self.flat_parameters()):
             pnew.name = pold.name
             # probably worth caching
             if pnew.intermediate:
@@ -211,22 +233,22 @@ class BasisPoly:
         # covariance is invalidated whenever parameters are changed
         self._cov = None
 
-    def update_from_roofit(self, fit_result):
+    def update_from_roofit(self, fit_result, independent: bool = False):
         par_names = sorted([p for p in fit_result.floatParsFinal().contentsString().split(",") if self.name in p])
         means, cov = params_from_roofit(fit_result, par_names)
         par_results = {p: round(means[i], 3) for i, p in enumerate(par_names)}
-        for par in self._params.reshape(-1):
+        for par in self.flat_parameters(independent):
             par.value = par_results[par.name]
         self._cov = cov
 
-    def set_parvalues(self, parvalues):
-        for par, new_val in zip(self._params.reshape(-1), parvalues):
-            par.value = new_val
+    def set_parvalues(self, parvalues, independent: bool = False):
+        for par, new_val in zip(self.flat_parameters(independent), parvalues):
+            par = update_par(par, parvalue)
 
-    def set_par_by_name(self, parname, parvalue):
-        for par in self._params.reshape(-1):
+    def set_par_by_name(self, parname, parvalue, independent: bool = False):
+        for par in self.flat_parameters(independent):
             if par.name==parname:
-                par.value = parvalue
+                par = update_par(par, parvalue)
 
     def coefficients(self, *xvals):
         # evaluate polynomial product tensor
@@ -256,16 +278,16 @@ class BasisPoly:
                 raise ValueError("BasisPoly: all variables must have same shape")
             xvals.append(x.flatten())
 
-        coefficients = self.coefficients(*xvals).reshape(-1, self._params.reshape(-1).size)
+        coefficients = self.coefficients(*xvals).reshape(-1, self.flat_parameters().size)
 
         return xvals, shape, coefficients
 
     def _eval(self, shape, coefficients):
-        parameters = get_parvalues(self._params.reshape(-1))
+        parameters = get_parvalues(self.flat_parameters())
         nominal_vals = (parameters * coefficients).sum(axis=1).reshape(shape)
         return nominal_vals
 
-    def __call__(self, *vals, nominal: bool = False, errorband: bool = False):
+    def __call__(self, *vals, nominal: bool = False, errorband: bool = False, independent: bool = False):
         """Evaluate the polynomial at the given values
 
         Parameters:
@@ -280,12 +302,12 @@ class BasisPoly:
             if errorband:
                 if self._cov is None:
                     raise RuntimeError("Can only compute error band after covariance matrix loaded using update_from_roofit()")
-                band = compute_band(self, shape, coefficients, nominal_vals)
+                band = compute_band(self, shape, coefficients, nominal_vals, independent)
                 return nominal_vals, band
             else:
                 return nominal_vals
 
-        parameters = self._params.reshape(-1)
+        parameters = self.flat_parameters()
         out = np.full(coefficients.shape[0], None)
         for i in range(coefficients.shape[0]):
             # sum small coefficients first
@@ -320,6 +342,7 @@ class ProductBasisPoly:
     def __init__(self, name, factors):
         if not factors:
             raise ValueError("ProductBasisPoly requires at least one BasisPoly factor")
+        self._name = name
         self._functions = list(factors)
 
         # deterministic parameter aggregation with deduplication
@@ -328,7 +351,7 @@ class ProductBasisPoly:
         for f in self._functions:
             if not isinstance(f, BasisPoly):
                 raise TypeError("All factors must be BasisPoly instances")
-            for p in f.parameters:
+            for p in f.flat_parameters(independent=True):
                 if p.name not in param_dict:
                     param_dict[p.name] = p
             for d in f.dim_names:
@@ -349,21 +372,34 @@ class ProductBasisPoly:
     def dim_names(self):
         return self._dim_names
 
-    def set_par_by_name(self, parname, parvalue):
-        for f in self._functions:
-            f.set_par_by_name(parname, parvalue)
+    @property
+    def independent_parameters(self):
+        ind_params = set()
+        for param in self._params:
+            ind_params.update(param.getDependents(deep=True))
+        return ind_params
 
-    def update_from_roofit(self, fit_result):
+    def flat_parameters(self, independent: bool = False):
+        if independent:
+            return self.independent_parameters
+        else:
+            return self._params.reshape(-1)
+
+    def set_par_by_name(self, parname, parvalue, independent: bool = False):
+        for f in self._functions:
+            f.set_par_by_name(parname, parvalue, independent)
+
+    def update_from_roofit(self, fit_result, independent: bool = False):
         par_names = sorted([p for p in fit_result.floatParsFinal().contentsString().split(",") if any([p==par.name for par in self._params])])
         means, cov = params_from_roofit(fit_result, par_names)
         par_results = {p: round(means[i], 3) for i, p in enumerate(par_names)}
-        for par in self._params.reshape(-1):
+        for par in self.flat_parameters():
             par.value = par_results[par.name]
         self._cov = cov
 
         # call for each factor to update parameter values
         for f in self._functions:
-            f.update_from_roofit(fit_result)
+            f.update_from_roofit(fit_result, independent)
 
     def _eval(self, shape, coefficients):
         for ifn, f in enumerate(self._functions):
@@ -374,7 +410,7 @@ class ProductBasisPoly:
                 results *= tmp
         return results
 
-    def __call__(self, *vals, nominal: bool = True, errorband: bool = False):
+    def __call__(self, *vals, nominal: bool = True, errorband: bool = False, independent: bool = False):
         if not nominal:
             raise ValueError("ProductBasisPoly currently does not implement nominal=False")
 
@@ -389,7 +425,7 @@ class ProductBasisPoly:
         if errorband:
             if self._cov is None:
                 raise RuntimeError("Can only compute error band after covariance matrix loaded using update_from_roofit()")
-            band = compute_band(self, shape, coefficients, nominal_vals)
+            band = compute_band(self, shape, coefficients, nominal_vals, independent)
             return nominal_vals, band
         else:
             return nominal_vals
