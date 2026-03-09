@@ -42,7 +42,7 @@ def matrix_poly(n: int):
 def svd_transform(cov):
     _, s, v = np.linalg.svd(cov)
     _transform = np.sqrt(s)[:, None] * v
-    return transform
+    return _transform
 
 
 def params_from_roofit(fitresult, param_names=None):
@@ -414,18 +414,29 @@ class DecorrelatedNuisanceVector:
     Parameters:
         prefix: a prefix for the names of the parameters
         param_in: a numpy array of means for the nuisance parameters
+        param_cov: a numpy array of covariance matrix for the nuisance parameters
+                   (mutually exclusive with transform)
         transform: a numpy array of coefficients, derived from the singular value decomposition of the covariance matrix of the nuisance parameters
+                   (mutually exclusive with param_cov)
     """
 
-    def __init__(self, prefix: str, param_in: np.ndarray, transform: np.ndarray):
+    def __init__(self, prefix: str, param_in: np.ndarray, param_cov: np.ndarray = None, transform: np.ndarray = None):
         if not isinstance(param_in, np.ndarray):
             raise ValueError("Expecting param_in to be numpy array")
-        if not isinstance(transform, np.ndarray):
+        if param_cov is not None and not isinstance(param_cov, np.ndarray):
+            raise ValueError("Expecting param_cov to be numpy array")
+        if transform is not None and not isinstance(transform, np.ndarray):
             raise ValueError("Expecting transform to be numpy array")
-        if not (len(param_in.shape) == 1 and len(transform.shape) == 2 and transform.shape[0] == param_in.shape[0] and transform.shape[1] == param_in.shape[0]):
-            raise ValueError("param_in and transform have mismatched shapes")
+        if param_cov is not None and transform is not None:
+            raise ValueError("param_cov and transform are mutually exclusive, pick one")
+        if param_cov is None and transform is None:
+            raise ValueError("Exactly one of param_cov or transform is required")
+        def compare_shape(param_in, cov_or_transform):
+            if not (len(param_in.shape) == 1 and len(cov_or_transform.shape) == 2 and cov_or_transform.shape[0] == param_in.shape[0] and cov_or_transform.shape[1] == param_in.shape[0]):
+                raise ValueError("param_in and param_cov (or transform) have mismatched shapes")
+        compare_shape(param_in, transform if transform else param_cov)
 
-        self._transform = transform
+        self._transform = transform if transform is not None else svd_transform(param_cov)
         self._parameters = np.array([NuisanceParameter(prefix + str(i + 1), "param") for i in range(param_in.size)])
         self._correlated = np.full(self._parameters.shape, None)
         for i in range(self._parameters.size):
@@ -445,7 +456,7 @@ class DecorrelatedNuisanceVector:
         """
         means, cov = params_from_roofit(fitresult, param_names)
         transform = svd_transform(cov)
-        out = cls(prefix, means, transform)
+        out = cls(prefix, means, transform=transform)
         if param_names is not None:
             for p, name in zip(out.correlated_params, param_names):
                 p.name = name
