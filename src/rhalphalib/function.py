@@ -73,7 +73,7 @@ def compute_band(obj, shape, coefficients, central):
     # compute gradients
     plus_vars = []
     minus_vars = []
-    params = obj.parameters.reshape(-1)
+    params = obj.flat_parameters
     for i, par in enumerate(params):
         val = par.value
         err = np.sqrt(obj._cov[i, i])
@@ -196,13 +196,17 @@ class BasisPoly:
     def parameters(self):
         return self._params
 
+    @property
+    def flat_parameters(self):
+        return self._params.reshape(-1)
+
     @parameters.setter
     def parameters(self, newparams):
         if not isinstance(newparams, np.ndarray):
             raise ValueError("newparams should be numpy array")
         elif newparams.shape != self._params.shape:
             raise ValueError("newparams shape does not match")
-        for pnew, pold in zip(newparams.reshape(-1), self._params.reshape(-1)):
+        for pnew, pold in zip(newparams.reshape(-1), self.flat_parameters):
             pnew.name = pold.name
             # probably worth caching
             if pnew.intermediate:
@@ -215,16 +219,16 @@ class BasisPoly:
         par_names = sorted([p for p in fit_result.floatParsFinal().contentsString().split(",") if self.name in p])
         means, cov = params_from_roofit(fit_result, par_names)
         par_results = {p: round(means[i], 3) for i, p in enumerate(par_names)}
-        for par in self._params.reshape(-1):
+        for par in self.flat_parameters:
             par.value = par_results[par.name]
         self._cov = cov
 
     def set_parvalues(self, parvalues):
-        for par, new_val in zip(self._params.reshape(-1), parvalues):
+        for par, new_val in zip(self.flat_parameters, parvalues):
             par.value = new_val
 
     def set_par_by_name(self, parname, parvalue):
-        for par in self._params.reshape(-1):
+        for par in self.flat_parameters:
             if par.name==parname:
                 par.value = parvalue
 
@@ -256,12 +260,12 @@ class BasisPoly:
                 raise ValueError("BasisPoly: all variables must have same shape")
             xvals.append(x.flatten())
 
-        coefficients = self.coefficients(*xvals).reshape(-1, self._params.reshape(-1).size)
+        coefficients = self.coefficients(*xvals).reshape(-1, self.flat_parameters.size)
 
         return xvals, shape, coefficients
 
     def _eval(self, shape, coefficients):
-        parameters = get_parvalues(self._params.reshape(-1))
+        parameters = get_parvalues(self.flat_parameters)
         nominal_vals = (parameters * coefficients).sum(axis=1).reshape(shape)
         return nominal_vals
 
@@ -285,7 +289,7 @@ class BasisPoly:
             else:
                 return nominal_vals
 
-        parameters = self._params.reshape(-1)
+        parameters = self.flat_parameters
         out = np.full(coefficients.shape[0], None)
         for i in range(coefficients.shape[0]):
             # sum small coefficients first
@@ -346,6 +350,10 @@ class ProductBasisPoly:
         return self._params
 
     @property
+    def flat_parameters(self):
+        return self._params.reshape(-1)
+
+    @property
     def dim_names(self):
         return self._dim_names
 
@@ -357,7 +365,7 @@ class ProductBasisPoly:
         par_names = sorted([p for p in fit_result.floatParsFinal().contentsString().split(",") if any([p==par.name for par in self._params])])
         means, cov = params_from_roofit(fit_result, par_names)
         par_results = {p: round(means[i], 3) for i, p in enumerate(par_names)}
-        for par in self._params.reshape(-1):
+        for par in self.flat_parameters:
             par.value = par_results[par.name]
         self._cov = cov
 
