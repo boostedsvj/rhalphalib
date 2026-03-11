@@ -2,6 +2,7 @@ from typing import Callable, List, Optional, Tuple
 from collections import OrderedDict
 import numpy as np
 from scipy.special import binom
+from scipy.linalg import block_diag
 import numbers
 import warnings
 from .parameter import IndependentParameter, NuisanceParameter, DependentParameter
@@ -215,13 +216,30 @@ class BasisPoly:
         # covariance is invalidated whenever parameters are changed
         self._cov = None
 
-    def update_from_roofit(self, fit_result):
-        par_names = sorted([p for p in fit_result.floatParsFinal().contentsString().split(",") if self.name in p])
-        means, cov = params_from_roofit(fit_result, par_names)
-        par_results = {p: round(means[i], 3) for i, p in enumerate(par_names)}
-        for par in self.flat_parameters:
-            par.value = par_results[par.name]
-        self._cov = cov
+    def update_from_roofit(self, fit_result, transform=None, deco_name=None):
+        if (transform is None) ^ (deco_name is None):
+            raise ValueError("both transform and deco_name must be provided")
+
+        def update_obj_from_roofit(obj):
+            par_names = sorted([p for p in fit_result.floatParsFinal().contentsString().split(",") if obj.name in p])
+            means, cov = params_from_roofit(fit_result, par_names)
+            par_results = {p: round(means[i], 3) for i, p in enumerate(par_names)}
+            for par in obj.flat_parameters:
+                par.value = par_results[par.name]
+            obj._cov = cov
+            return obj
+
+        if transform is not None and deco_name is not None:
+            decoVector = DecorrelatedNuisanceVector(deco_name, np.array([p.value for p in self.flat_parameters]), transform=transform)
+            decoVector = update_obj_from_roofit(decoVector)
+            # update parameter values using deco formulas
+            self.set_parvalues([p.value for p in decoVector.correlated_params.reshape(-1)])
+            # covariance matrix order follows decoVector._parameters, not argsort(abs(transform coef))
+            self._cov = transform @ decoVector._cov @ transform.T
+            # save in case of later use by ProductBasisPoly
+            self._decoVector = decoVector
+        else:
+            update_obj_from_roofit(self)
 
     def set_parvalues(self, parvalues):
         for par, new_val in zip(self.flat_parameters, parvalues):
@@ -361,17 +379,29 @@ class ProductBasisPoly:
         for f in self._functions:
             f.set_par_by_name(parname, parvalue)
 
-    def update_from_roofit(self, fit_result):
-        par_names = sorted([p for p in fit_result.floatParsFinal().contentsString().split(",") if any([p==par.name for par in self._params])])
-        means, cov = params_from_roofit(fit_result, par_names)
-        par_results = {p: round(means[i], 3) for i, p in enumerate(par_names)}
-        for par in self.flat_parameters:
-            par.value = par_results[par.name]
-        self._cov = cov
-
-        # call for each factor to update parameter values
+    def update_from_roofit(self, fit_result, transforms=None, deco_names=None):
+        if transforms is None:
+            transforms = {}
+        if deco_names is None:
+            deco_names = {}
+        # call for each factor to update parameter values and handle any deco
+        all_par_names = []
+        all_transforms = []
         for f in self._functions:
-            f.update_from_roofit(fit_result)
+            transform = transforms.get(f.name, None)
+            f.update_from_roofit(fit_result, transform, deco_names.get(f.name, None))
+            # if f updated from deco, then cov will be in terms of decorrelated parameters
+            f_pars = f._decoVector.flat_parameters if hasattr(f, "_decoVector") else f.flat_parameters
+            all_par_names.extend([par.name for par in f_pars])
+            if transform is None:
+                transform = np.eye(len(f_pars))
+            all_transforms.append(transform)
+
+        # get complete covariance matrix and transform into final (dependent) parameter representation
+        full_transform = block_diag(*all_transforms)
+        par_names = sorted([p for p in fit_result.floatParsFinal().contentsString().split(",") if p in all_par_names])
+        _, cov = params_from_roofit(fit_result, par_names)
+        self._cov = full_transform @ cov @ full_transform.T
 
     def _eval(self, shape, coefficients):
         for ifn, f in enumerate(self._functions):
@@ -436,6 +466,7 @@ class DecorrelatedNuisanceVector:
                 raise ValueError("param_in and param_cov (or transform) have mismatched shapes")
         compare_shape(param_in, transform if transform else param_cov)
 
+        self.name = prefix
         self._transform = transform if transform is not None else svd_transform(param_cov)
         self._parameters = np.array([NuisanceParameter(prefix + str(i + 1), "param") for i in range(param_in.size)])
         self._correlated = np.full(self._parameters.shape, None)
@@ -465,6 +496,10 @@ class DecorrelatedNuisanceVector:
     @property
     def parameters(self):
         return self._parameters
+
+    @property
+    def flat_parameters(self):
+        return self._parameters.reshape(-1)
 
     @property
     def correlated_params(self):
