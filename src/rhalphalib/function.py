@@ -221,7 +221,12 @@ class BasisPoly:
             raise ValueError("both transform and deco_name must be provided")
 
         def update_obj_from_roofit(obj):
-            par_names = sorted([p for p in fit_result.floatParsFinal().contentsString().split(",") if obj.name in p])
+            # order is important for transforms
+            fit_result_pars = fit_result.floatParsFinal().contentsString().split(",")
+            par_names = [p.name for p in obj.flat_parameters]
+            missing_pars = [p for p in par_names if p not in fit_result_pars]
+            if len(missing_pars)>0:
+                raise ValueError("Some function parameters missing from fit result: "+','.join(missing_pars))
             means, cov = params_from_roofit(fit_result, par_names)
             par_results = {p: round(means[i], 3) for i, p in enumerate(par_names)}
             for par in obj.flat_parameters:
@@ -399,8 +404,11 @@ class ProductBasisPoly:
 
         # get complete covariance matrix and transform into final (dependent) parameter representation
         full_transform = block_diag(*all_transforms)
-        par_names = sorted([p for p in fit_result.floatParsFinal().contentsString().split(",") if p in all_par_names])
-        _, cov = params_from_roofit(fit_result, par_names)
+        fit_result_pars = fit_result.floatParsFinal().contentsString().split(",")
+        missing_pars = [p for p in all_par_names if p not in fit_result_pars]
+        if len(missing_pars)>0:
+            raise ValueError("Some function parameters missing from fit result: "+','.join(missing_pars))
+        _, cov = params_from_roofit(fit_result, all_par_names)
         self._cov = full_transform @ cov @ full_transform.T
 
     def _eval(self, shape, coefficients):
