@@ -225,8 +225,8 @@ class BasisPoly:
             fit_result_pars = fit_result.floatParsFinal().contentsString().split(",")
             par_names = [p.name for p in obj.flat_parameters]
             missing_pars = [p for p in par_names if p not in fit_result_pars]
-            if len(missing_pars)>0:
-                raise ValueError("Some function parameters missing from fit result: "+','.join(missing_pars))
+            if len(missing_pars) > 0:
+                raise ValueError("Some function parameters missing from fit result: " + ",".join(missing_pars))
             means, cov = params_from_roofit(fit_result, par_names)
             par_results = {p: round(means[i], 3) for i, p in enumerate(par_names)}
             for par in obj.flat_parameters:
@@ -252,7 +252,7 @@ class BasisPoly:
 
     def set_par_by_name(self, parname, parvalue):
         for par in self.flat_parameters:
-            if par.name==parname:
+            if par.name == parname:
                 par.value = parvalue
 
     def coefficients(self, *xvals):
@@ -344,6 +344,7 @@ class ProductBasisPoly:
         name: will be used to prefix any RooFit object names
         factors: list of BasisPoly objects that are multiplied together
     """
+
     def __init__(self, name, factors):
         if not factors:
             raise ValueError("ProductBasisPoly requires at least one BasisPoly factor")
@@ -406,15 +407,15 @@ class ProductBasisPoly:
         full_transform = block_diag(*all_transforms)
         fit_result_pars = fit_result.floatParsFinal().contentsString().split(",")
         missing_pars = [p for p in all_par_names if p not in fit_result_pars]
-        if len(missing_pars)>0:
-            raise ValueError("Some function parameters missing from fit result: "+','.join(missing_pars))
+        if len(missing_pars) > 0:
+            raise ValueError("Some function parameters missing from fit result: " + ",".join(missing_pars))
         _, cov = params_from_roofit(fit_result, all_par_names)
         self._cov = full_transform @ cov @ full_transform.T
 
     def _eval(self, shape, coefficients):
         for ifn, f in enumerate(self._functions):
             tmp = f._eval(shape[ifn], coefficients[ifn])
-            if ifn==0:
+            if ifn == 0:
                 results = tmp
             else:
                 results *= tmp
@@ -469,9 +470,11 @@ class DecorrelatedNuisanceVector:
             raise ValueError("param_cov and transform are mutually exclusive, pick one")
         if param_cov is None and transform is None:
             raise ValueError("Exactly one of param_cov or transform is required")
+
         def compare_shape(param_in, cov_or_transform):
             if not (len(param_in.shape) == 1 and len(cov_or_transform.shape) == 2 and cov_or_transform.shape[0] == param_in.shape[0] and cov_or_transform.shape[1] == param_in.shape[0]):
                 raise ValueError("param_in and param_cov (or transform) have mismatched shapes")
+
         compare_shape(param_in, transform if transform else param_cov)
 
         self.name = prefix
