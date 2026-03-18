@@ -475,7 +475,7 @@ class DecorrelatedNuisanceVector:
             if not (len(param_in.shape) == 1 and len(cov_or_transform.shape) == 2 and cov_or_transform.shape[0] == param_in.shape[0] and cov_or_transform.shape[1] == param_in.shape[0]):
                 raise ValueError("param_in and param_cov (or transform) have mismatched shapes")
 
-        compare_shape(param_in, transform if transform else param_cov)
+        compare_shape(param_in, transform if transform is not None else param_cov)
 
         self.name = prefix
         self._transform = transform if transform is not None else svd_transform(param_cov)
